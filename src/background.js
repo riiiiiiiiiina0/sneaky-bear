@@ -1,297 +1,284 @@
 // @ts-nocheck
 /* global chrome */
-// Tracks the tabId that currently owns Picture-in-Picture, if any
-let currentPipOwnerTabId = null;
+/* Sneaky Bear PiP - Background Service Worker (MV3) */
 
-const STORAGE_KEY = 'pipOwnerTabId';
+let lastPlayingTabId = null; // Active tab that last reported playing video
+let pipActiveTabId = null; // Tab that currently has PiP active
 
-async function saveOwnerToSession(tabId) {
+// Helper: run a function in a tab
+async function runInTab(tabId, func, args = []) {
   try {
-    if (chrome?.storage?.session) {
-      await chrome.storage.session.set({ [STORAGE_KEY]: tabId });
-    }
-  } catch (_) {}
+    return await chrome.scripting.executeScript({
+      target: { tabId },
+      func,
+      args,
+    });
+  } catch (_) {
+    return null;
+  }
 }
 
-async function clearOwnerFromSession() {
-  try {
-    if (chrome?.storage?.session) {
-      await chrome.storage.session.remove(STORAGE_KEY);
-    }
-  } catch (_) {}
-}
+// Page functions (executed in the tab)
+async function pageEnterPiP() {
+  // console.log('[Sneaky Bear] pageEnterPiP');
+  const videos = Array.from(document.querySelectorAll('video'));
+  // console.log('[Sneaky Bear] videos', videos);
+  const candidates = videos.filter(
+    (v) => !v.paused && !v.ended && v.readyState >= 2,
+  );
+  // console.log('[Sneaky Bear] candidates', candidates);
+  const pick = (list) =>
+    list.sort(
+      (a, b) => b.videoWidth * b.videoHeight - a.videoWidth * a.videoHeight,
+    )[0];
+  const target = pick(candidates) || pick(videos) || null;
+  // console.log('[Sneaky Bear] target', target);
+  if (!target) return { ok: false, error: 'NoVideo' };
 
-async function restoreOwnerFromSession() {
+  // console.log('[Sneaky Bear] ensure pip enabled');
   try {
-    if (!chrome?.storage?.session) return null;
-    const obj = await chrome.storage.session.get(STORAGE_KEY);
-    const stored = obj && obj[STORAGE_KEY];
-    if (typeof stored === 'number') {
-      currentPipOwnerTabId = stored;
-      return stored;
-    }
+    target.disablePictureInPicture = false;
   } catch (_) {}
-  return null;
-}
 
-async function getKnownActivePipTabId() {
-  if (currentPipOwnerTabId != null) return currentPipOwnerTabId;
-  const restored = await restoreOwnerFromSession();
-  if (restored != null) {
-    // Verify it's still actually active; otherwise fall back to a scan
+  // console.log('[Sneaky Bear] exit pip if any');
+  if (
+    document.pictureInPictureElement &&
+    document.pictureInPictureElement !== target
+  ) {
     try {
-      const response = await chrome.tabs.sendMessage(restored, {
-        type: 'query-pip-state',
-      });
-      if (response && response.active === true) {
-        return restored;
-      }
+      await document.exitPictureInPicture();
     } catch (_) {}
   }
-  const scanned = await queryAnyActivePipTabId();
-  if (scanned != null) {
-    currentPipOwnerTabId = scanned;
-    await saveOwnerToSession(scanned);
-  }
-  return scanned;
-}
 
-// On service worker startup, opportunistically restore last known owner
-(async () => {
-  await restoreOwnerFromSession();
-})();
-
-// Helper to send a message to a specific tab
-async function sendMessageToTab(tabId, message) {
+  // console.log('[Sneaky Bear] request picture in picture');
   try {
-    await chrome.tabs.sendMessage(tabId, message);
-  } catch (error) {
-    // Ignore errors when tab is unavailable or does not have our content script
+    const result = await target.requestPictureInPicture();
+    // console.log('[Sneaky Bear] requestPictureInPicture', result);
+    return { ok: true };
+  } catch (err) {
+    // console.log('[Sneaky Bear] requestPictureInPicture error', err);
+    const name = err && err.name ? err.name : 'Error';
+    return { ok: false, error: name };
   }
 }
 
-async function queryAnyActivePipTabId() {
-  try {
-    const tabs = await chrome.tabs.query({});
-    for (const tab of tabs) {
-      if (tab.id == null) continue;
+function pageExitPiPAndPause() {
+  (async () => {
+    const pipEl = /** @type {HTMLVideoElement | null} */ (
+      document.pictureInPictureElement
+    );
+    if (pipEl) {
       try {
-        const response = await chrome.tabs.sendMessage(tab.id, {
-          type: 'query-pip-state',
-        });
-        if (response && response.active === true) {
-          return tab.id;
-        }
-      } catch (_) {
-        // ignore tabs without our content script or unreachable
+        await document.exitPictureInPicture();
+      } catch (_) {}
+      try {
+        pipEl.pause();
+      } catch (_) {}
+      return true;
+    }
+    // Fallback: pause any playing videos
+    const videos = Array.from(document.querySelectorAll('video'));
+    const playing = /** @type {HTMLVideoElement[]} */ (videos).filter(
+      (v) => !v.paused && !v.ended,
+    );
+    for (const v of playing) {
+      try {
+        v.pause();
+      } catch (_) {}
+    }
+    return false;
+  })();
+}
+
+function pageHasActivePiP() {
+  try {
+    return !!document.pictureInPictureElement;
+  } catch (_) {
+    return false;
+  }
+}
+
+function pageHasUserActivation() {
+  try {
+    const ua = navigator.userActivation;
+    // hasBeenActive stays true after any gesture; isActive is transient
+    return !!(ua && (ua.isActive || ua.hasBeenActive));
+  } catch (_) {
+    return false;
+  }
+}
+
+async function ensurePiPInTab(tabId) {
+  // console.log('[Sneaky Bear] ensurePiPInTab', tabId);
+  const res = await runInTab(tabId, pageEnterPiP);
+  const data = Array.isArray(res) && res[0] ? res[0].result : null;
+  return !!(data && data.ok);
+}
+
+async function exitPiPAndPauseInTab(tabId) {
+  await runInTab(tabId, pageExitPiPAndPause);
+}
+
+async function findTabWithActivePiP() {
+  try {
+    const tabs = await chrome.tabs.query({
+      url: ['http://*/*', 'https://*/*'],
+    });
+    const results = await Promise.all(
+      tabs.map((t) => runInTab(t.id, pageHasActivePiP)),
+    );
+    for (let i = 0; i < tabs.length; i++) {
+      const res = results[i];
+      const first = Array.isArray(res) && res[0] ? res[0] : null;
+      if (first && first.result) {
+        return tabs[i].id;
       }
     }
-  } catch (_) {
-    // ignore
-  }
+  } catch (_) {}
   return null;
 }
 
-async function togglePiP(invocationTab) {
-  // If we believe PiP is active somewhere already, deactivate immediately
-  const knownActiveTabId = await getKnownActivePipTabId();
-  if (knownActiveTabId != null) {
-    await sendMessageToTab(knownActiveTabId, { type: 'deactivate-pip' });
-    currentPipOwnerTabId = null;
-    await clearOwnerFromSession();
-    return;
+async function closeActivePiPIfAny() {
+  let targetTabId = pipActiveTabId;
+  if (!targetTabId) {
+    targetTabId = await findTabWithActivePiP();
   }
+  if (targetTabId != null) {
+    await exitPiPAndPauseInTab(targetTabId);
+  }
+  lastPlayingTabId = null;
+  pipActiveTabId = null;
+}
 
-  // Determine target tab. Prefer the tab from the user action callback to retain user activation
-  let targetTab = invocationTab;
-  if (!targetTab || targetTab.id == null) {
-    const [activeTab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
-    targetTab = activeTab;
-  }
-  if (!targetTab || targetTab.id == null) {
-    return;
-  }
+async function clearBadgeText() {
   try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: targetTab.id, allFrames: true },
-      world: 'MAIN',
-      func: () => {
-        return (async () => {
-          try {
-            const candidates = Array.from(
-              document.querySelectorAll('video'),
-            ).filter((v) => !v.disablePictureInPicture);
-            if (candidates.length === 0) {
-              return { ok: false, reason: 'no-video' };
-            }
-            const getSorted = () => {
-              const withScores = candidates.map((v) => {
-                const rect = v.getBoundingClientRect();
-                const area = Math.max(0, rect.width) * Math.max(0, rect.height);
-                const isVisible =
-                  area > 0 &&
-                  rect.bottom > 0 &&
-                  rect.right > 0 &&
-                  rect.top < window.innerHeight &&
-                  rect.left < window.innerWidth;
-                const isPlaying = !v.paused && !v.ended && v.readyState > 2;
-                const score =
-                  (isVisible ? 2 : 0) + (isPlaying ? 3 : 0) + area / 10000;
-                return { v, score, isVisible };
-              });
-              const visible = withScores.filter((x) => x.isVisible);
-              const pool = visible.length ? visible : withScores;
-              pool.sort((a, b) => b.score - a.score);
-              return pool.map((x) => x.v);
-            };
-            const sorted = getSorted();
-            if (sorted.length === 0) {
-              return { ok: false, reason: 'no-video' };
-            }
-            const waitForPlaying = (v, timeoutMs = 800) =>
-              new Promise((resolve) => {
-                let done = false;
-                const cleanup = () => {
-                  v.removeEventListener('playing', onPlaying, true);
-                  v.removeEventListener('timeupdate', onTimeUpdate, true);
-                  v.removeEventListener('canplay', onCanPlay, true);
-                  clearTimeout(timer);
-                };
-                const onPlaying = () => {
-                  if (done) return;
-                  done = true;
-                  cleanup();
-                  resolve(true);
-                };
-                const onTimeUpdate = () => {
-                  if (done) return;
-                  if (v.currentTime > 0) {
-                    done = true;
-                    cleanup();
-                    resolve(true);
-                  }
-                };
-                const onCanPlay = () => {
-                  if (done) return;
-                  requestAnimationFrame(() => {
-                    if (!done) {
-                      done = true;
-                      cleanup();
-                      resolve(true);
-                    }
-                  });
-                };
-                const timer = setTimeout(() => {
-                  if (done) return;
-                  done = true;
-                  cleanup();
-                  resolve(false);
-                }, timeoutMs);
-                v.addEventListener('playing', onPlaying, true);
-                v.addEventListener('timeupdate', onTimeUpdate, true);
-                v.addEventListener('canplay', onCanPlay, true);
-              });
+    await chrome.action.setBadgeText({ text: '' });
+  } catch (_) {}
+}
 
-            for (const video of sorted) {
-              let startedByUs = false;
-              const wasMuted = video.muted;
-              try {
-                try {
-                  await video.requestPictureInPicture();
-                  return { ok: true };
-                } catch (e1) {
-                  video.playsInline = true;
-                  video.muted = true;
-                  await video.play();
-                  startedByUs = true;
-                  await waitForPlaying(video);
-                  await video.requestPictureInPicture();
-                  return { ok: true };
-                }
-              } catch (_) {
-                try {
-                  if (startedByUs) video.pause();
-                } catch (_) {}
-              } finally {
-                try {
-                  if (!wasMuted) video.muted = false;
-                } catch (_) {}
-              }
-            }
-            return { ok: false, reason: 'request-failed' };
-          } catch (err) {
-            return {
-              ok: false,
-              reason: 'exception',
-              message: (err && err.message) || String(err),
-            };
-          }
-        })();
-      },
-    });
-    const anyOk =
-      Array.isArray(results) &&
-      results.some((r) => r && r.result && r.result.ok);
-    if (!anyOk) {
-      await sendMessageToTab(targetTab.id, { type: 'activate-pip' });
-    } else {
-      // We activated PiP via direct script; record ownership immediately
-      currentPipOwnerTabId = targetTab.id;
-      await saveOwnerToSession(currentPipOwnerTabId);
+async function setBadgeText(text, color, clearTimeout = 0) {
+  try {
+    await chrome.action.setBadgeBackgroundColor({ color });
+    await chrome.action.setBadgeText({ text });
+    if (clearTimeout > 0) {
+      setTimeout(() => {
+        chrome.action.setBadgeText({ text: '' });
+      }, clearTimeout);
     }
-  } catch (_) {
-    await sendMessageToTab(targetTab.id, { type: 'activate-pip' });
+  } catch (_) {}
+}
+
+async function togglePiP() {
+  // If there is active PiP, close it and pause
+  const existing = await findTabWithActivePiP();
+  if (existing != null) {
+    await exitPiPAndPauseInTab(existing);
+    lastPlayingTabId = null;
+    pipActiveTabId = null;
+    await clearBadgeText();
+    return;
+  }
+
+  // Otherwise try the last known playing tab or fallback to current active
+  let target = lastPlayingTabId;
+  if (target == null) {
+    try {
+      const [activeTab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      if (activeTab) target = activeTab.id;
+    } catch (_) {}
+  }
+  if (target != null) {
+    const ok = await ensurePiPInTab(target);
+    if (!ok) {
+      // If it failed due to lack of activation, hint the user
+      await setBadgeText('👆', '#F44336', 2000);
+    } else {
+      await clearBadgeText();
+    }
   }
 }
 
-// Listen for messages from content scripts to update PiP ownership
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message && message.type === 'pip-status') {
-    if (message.active === true && sender.tab && sender.tab.id != null) {
-      currentPipOwnerTabId = sender.tab.id;
-      saveOwnerToSession(currentPipOwnerTabId);
+// Listen for messages from content scripts about video/PiP state
+chrome.runtime.onMessage.addListener((message, sender) => {
+  const tabId = sender?.tab?.id;
+  if (!tabId) return;
+
+  switch (message.type) {
+    case 'VIDEO_PLAYING': {
+      if (sender.tab && sender.tab.active) {
+        // console.log('[Sneaky Bear] lastPlayingTabId', tabId);
+        lastPlayingTabId = tabId;
+      }
+      break;
     }
-    if (message.active === false) {
-      currentPipOwnerTabId = null;
-      clearOwnerFromSession();
+    case 'VIDEO_PAUSED': {
+      if (sender.tab && sender.tab.active && lastPlayingTabId === tabId) {
+        lastPlayingTabId = null;
+      }
+      break;
     }
-    sendResponse({ ok: true });
-    return true;
+    case 'PIP_ENTERED': {
+      pipActiveTabId = tabId;
+      break;
+    }
+    case 'PIP_EXITED': {
+      if (pipActiveTabId === tabId) {
+        pipActiveTabId = null;
+      }
+      break;
+    }
+    default:
+      break;
   }
 });
 
-// Handle toolbar icon click: toggle PiP (pass the clicked tab)
-chrome.action.onClicked.addListener((tab) => togglePiP(tab));
-
-// Handle global keyboard shortcut command
-chrome.commands.onCommand.addListener(async (command) => {
-  if (command === 'toggle-pip') {
-    await togglePiP();
-  }
-});
-
-// If the owning tab is closed or navigates, clear ownership
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (tabId === currentPipOwnerTabId) {
-    currentPipOwnerTabId = null;
-    clearOwnerFromSession();
-  }
-});
-
-chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === 'install') {
-    chrome.tabs.create({
-      url: 'https://triiii.notion.site/Hello-from-Sneaky-Bear-PiP-26a7aa7407c180d280c6ec3fba960354',
+// When active tab changes, auto-activate PiP in the last playing tab
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  if (lastPlayingTabId != null && lastPlayingTabId !== tabId) {
+    // Only attempt auto-PiP if the source tab had a gesture; otherwise it will be blocked
+    runInTab(lastPlayingTabId, pageHasUserActivation).then((res) => {
+      const hasUA = Array.isArray(res) && res[0] ? !!res[0].result : false;
+      if (hasUA) {
+        ensurePiPInTab(lastPlayingTabId);
+      } else {
+        setBadgeText('👆', '#F44336', 2000);
+      }
     });
   }
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (tabId === currentPipOwnerTabId && changeInfo.status === 'loading') {
-    currentPipOwnerTabId = null;
-    clearOwnerFromSession();
+// Also handle window focus changes (switching between windows)
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, windowId });
+    if (
+      activeTab &&
+      lastPlayingTabId != null &&
+      lastPlayingTabId !== activeTab.id
+    ) {
+      const res = await runInTab(lastPlayingTabId, pageHasUserActivation);
+      const hasUA = Array.isArray(res) && res[0] ? !!res[0].result : false;
+      if (hasUA) {
+        ensurePiPInTab(lastPlayingTabId);
+      } else {
+        setBadgeText('👆', '#F44336', 2000);
+      }
+    }
+  } catch (_) {}
+});
+
+// Keyboard shortcut
+chrome.commands.onCommand.addListener((command) => {
+  if (command === 'toggle-pip') {
+    togglePiP();
   }
+});
+
+// Toolbar button
+chrome.action.onClicked.addListener(() => {
+  togglePiP();
 });

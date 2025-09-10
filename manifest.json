@@ -25,15 +25,6 @@
   "action": {
     "default_title": "Toggle Picture-in-Picture"
   },
-  "commands": {
-    "toggle-pip": {
-      "suggested_key": {
-        "default": "Ctrl+Period",
-        "mac": "Ctrl+Period"
-      },
-      "description": "Toggle Picture-in-Picture"
-    }
-  },
   "content_scripts": [
     {
       "matches": [
@@ -43,8 +34,17 @@
       "js": [
         "src/contentScripts/content.js"
       ],
-      "run_at": "document_idle",
+      "run_at": "document_start",
       "all_frames": true
     }
-  ]
+  ],
+  "commands": {
+    "toggle-pip": {
+      "suggested_key": {
+        "default": "Ctrl+Comma",
+        "mac": "Ctrl+Comma"
+      },
+      "description": "Toggle Picture-in-Picture"
+    }
+  }
 }
