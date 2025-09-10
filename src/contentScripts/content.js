@@ -5,6 +5,7 @@
 
   function send(type, payload) {
     try {
+      // console.log('[Sneaky Bear] send', type, payload);
       chrome.runtime.sendMessage({ type, ...payload });
     } catch (e) {
       // Ignore if context is unloading
@@ -43,6 +44,11 @@
     video.addEventListener('ended', handlePause, true);
     video.addEventListener('enterpictureinpicture', handleEnterPiP, true);
     video.addEventListener('leavepictureinpicture', handleLeavePiP, true);
+
+    // If the video is already playing when we attach, report it immediately
+    if (!video.paused && !video.ended && video.readyState >= 2) {
+      handlePlay();
+    }
   }
 
   /** @param {ParentNode} [root=document] */
@@ -50,6 +56,8 @@
     const videos = /** @type {ParentNode} */ (root).querySelectorAll
       ? /** @type {ParentNode} */ (root).querySelectorAll('video')
       : [];
+    if (videos.length === 0) return;
+    // console.log('[Sneaky Bear] scan and attach', videos);
     videos.forEach(attachVideoListeners);
   }
 
@@ -64,6 +72,7 @@
           if (node.nodeType !== 1) return;
           const el = /** @type {Element} */ (node);
           if (el.tagName === 'VIDEO') {
+            // console.log('[Sneaky Bear] video element added', el);
             attachVideoListeners(/** @type {HTMLVideoElement} */ (el));
           } else {
             scanAndAttach(/** @type {ParentNode} */ (el));
