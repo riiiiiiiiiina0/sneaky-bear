@@ -31,7 +31,7 @@
         "default": "Ctrl+Period",
         "mac": "Ctrl+Period"
       },
-      "description": "Toggle Picture-in-Picture globally"
+      "description": "Toggle Picture-in-Picture"
     }
   },
   "content_scripts": [
