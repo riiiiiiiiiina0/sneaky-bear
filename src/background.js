@@ -281,6 +281,14 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === 'install') {
+    chrome.tabs.create({
+      url: 'https://triiii.notion.site/Hello-from-Sneaky-Bear-PiP-26a7aa7407c180d280c6ec3fba960354',
+    });
+  }
+});
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (tabId === currentPipOwnerTabId && changeInfo.status === 'loading') {
     currentPipOwnerTabId = null;
