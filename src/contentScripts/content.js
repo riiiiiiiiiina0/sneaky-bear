@@ -178,6 +178,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: true, active: isActive });
       return;
     }
+    if (message && message.type === 'query-is-playing') {
+      const isPlaying =
+        !!document.pictureInPictureElement || // Already in PiP counts as playing
+        !!Array.from(document.querySelectorAll('video')).find(
+          (v) =>
+            v.readyState > 2 &&
+            !v.paused &&
+            !v.ended &&
+            v.offsetWidth > 0 &&
+            v.offsetHeight > 0,
+        );
+      sendResponse({ ok: true, isPlaying });
+      return;
+    }
   })();
   return true; // keep the message channel open for async sendResponse
 });

@@ -281,11 +281,51 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
-chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === 'install') {
-    chrome.tabs.create({
-      url: 'https://triiii.notion.site/Hello-from-Sneaky-Bear-PiP-26a7aa7407c180d280c6ec3fba960354',
+// --- Auto-PiP on tab switch ---
+
+let lastActiveTabId = null;
+
+async function initializeActiveTab() {
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (activeTab) {
+    lastActiveTabId = activeTab.id;
+  }
+}
+
+// Initialize on startup and when a new window becomes focused
+initializeActiveTab();
+chrome.windows.onFocusChanged.addListener(initializeActiveTab);
+
+// Listen for tab activation changes
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  const previousTabId = lastActiveTabId;
+  lastActiveTabId = activeInfo.tabId;
+
+  if (previousTabId == null || previousTabId === activeInfo.tabId) {
+    return;
+  }
+
+  // If we're leaving a tab that was playing video, and nothing is in PiP, auto-PiP it
+  try {
+    const prevTab = await chrome.tabs.get(previousTabId);
+    // Don't auto-PiP if the tab is in a different window
+    if (prevTab.windowId !== activeInfo.windowId) {
+      return;
+    }
+    const response = await chrome.tabs.sendMessage(previousTabId, {
+      type: 'query-is-playing',
     });
+    if (response && response.isPlaying) {
+      const knownActiveTabId = await getKnownActivePipTabId();
+      if (knownActiveTabId === null) {
+        await togglePiP(prevTab);
+      }
+    }
+  } catch (err) {
+    // fine, content script probably not injected
   }
 });
 
@@ -293,5 +333,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (tabId === currentPipOwnerTabId && changeInfo.status === 'loading') {
     currentPipOwnerTabId = null;
     clearOwnerFromSession();
+  }
+});
+
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === 'install') {
+    chrome.tabs.create({
+      url: 'https://triiii.notion.site/Hello-from-Sneaky-Bear-PiP-26a7aa7407c180d280c6ec3fba960354',
+    });
   }
 });
