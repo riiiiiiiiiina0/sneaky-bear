@@ -18,6 +18,15 @@
   "action": {
     "default_title": "Toggle Picture-in-Picture"
   },
+  "commands": {
+    "toggle-pip": {
+      "suggested_key": {
+        "default": "Ctrl+Period",
+        "mac": "Ctrl+Period"
+      },
+      "description": "Toggle Picture-in-Picture globally"
+    }
+  },
   "content_scripts": [
     {
       "matches": [

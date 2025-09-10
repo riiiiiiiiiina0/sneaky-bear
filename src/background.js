@@ -12,6 +12,21 @@ async function sendMessageToTab(tabId, message) {
   }
 }
 
+async function togglePiP() {
+  if (currentPipOwnerTabId != null) {
+    await sendMessageToTab(currentPipOwnerTabId, { type: 'deactivate-pip' });
+    return;
+  }
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (!activeTab || activeTab.id == null) {
+    return;
+  }
+  await sendMessageToTab(activeTab.id, { type: 'activate-pip' });
+}
+
 // Listen for messages from content scripts to update PiP ownership
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === 'pip-status') {
@@ -27,23 +42,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // Handle toolbar icon click: toggle PiP
-chrome.action.onClicked.addListener(async () => {
-  if (currentPipOwnerTabId != null) {
-    // A PiP is active somewhere → request deactivation on that tab
-    await sendMessageToTab(currentPipOwnerTabId, { type: 'deactivate-pip' });
-    return;
-  }
+chrome.action.onClicked.addListener(togglePiP);
 
-  // No active PiP → activate on current active tab
-  const [activeTab] = await chrome.tabs.query({
-    active: true,
-    currentWindow: true,
-  });
-  if (!activeTab || activeTab.id == null) {
-    return;
+// Handle global keyboard shortcut command
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command === 'toggle-pip') {
+    await togglePiP();
   }
-
-  await sendMessageToTab(activeTab.id, { type: 'activate-pip' });
 });
 
 // If the owning tab is closed or navigates, clear ownership
