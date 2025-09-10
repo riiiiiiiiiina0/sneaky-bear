@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Quick PiP Toggle",
+  "name": "Sneaky Bear PiP",
   "version": "0.1.0",
-  "description": "Toggle Picture-in-Picture on the current page and deactivate from any tab.",
+  "description": "Sneaky Bear PiP lets you watch videos in Picture-in-Picture on any page, and hide them instantly when you need to stay under the radar.",
+  "icons": {
+    "16": "icons/icon-16x16.png",
+    "32": "icons/icon-32x32.png",
+    "48": "icons/icon-48x48.png",
+    "128": "icons/icon-128x128.png"
+  },
   "permissions": [
     "activeTab",
     "tabs",
