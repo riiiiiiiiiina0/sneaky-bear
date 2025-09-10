@@ -3,6 +3,64 @@
 // Tracks the tabId that currently owns Picture-in-Picture, if any
 let currentPipOwnerTabId = null;
 
+const STORAGE_KEY = 'pipOwnerTabId';
+
+async function saveOwnerToSession(tabId) {
+  try {
+    if (chrome?.storage?.session) {
+      await chrome.storage.session.set({ [STORAGE_KEY]: tabId });
+    }
+  } catch (_) {}
+}
+
+async function clearOwnerFromSession() {
+  try {
+    if (chrome?.storage?.session) {
+      await chrome.storage.session.remove(STORAGE_KEY);
+    }
+  } catch (_) {}
+}
+
+async function restoreOwnerFromSession() {
+  try {
+    if (!chrome?.storage?.session) return null;
+    const obj = await chrome.storage.session.get(STORAGE_KEY);
+    const stored = obj && obj[STORAGE_KEY];
+    if (typeof stored === 'number') {
+      currentPipOwnerTabId = stored;
+      return stored;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function getKnownActivePipTabId() {
+  if (currentPipOwnerTabId != null) return currentPipOwnerTabId;
+  const restored = await restoreOwnerFromSession();
+  if (restored != null) {
+    // Verify it's still actually active; otherwise fall back to a scan
+    try {
+      const response = await chrome.tabs.sendMessage(restored, {
+        type: 'query-pip-state',
+      });
+      if (response && response.active === true) {
+        return restored;
+      }
+    } catch (_) {}
+  }
+  const scanned = await queryAnyActivePipTabId();
+  if (scanned != null) {
+    currentPipOwnerTabId = scanned;
+    await saveOwnerToSession(scanned);
+  }
+  return scanned;
+}
+
+// On service worker startup, opportunistically restore last known owner
+(async () => {
+  await restoreOwnerFromSession();
+})();
+
 // Helper to send a message to a specific tab
 async function sendMessageToTab(tabId, message) {
   try {
@@ -36,8 +94,11 @@ async function queryAnyActivePipTabId() {
 
 async function togglePiP(invocationTab) {
   // If we believe PiP is active somewhere already, deactivate immediately
-  if (currentPipOwnerTabId != null) {
-    await sendMessageToTab(currentPipOwnerTabId, { type: 'deactivate-pip' });
+  const knownActiveTabId = await getKnownActivePipTabId();
+  if (knownActiveTabId != null) {
+    await sendMessageToTab(knownActiveTabId, { type: 'deactivate-pip' });
+    currentPipOwnerTabId = null;
+    await clearOwnerFromSession();
     return;
   }
 
@@ -176,6 +237,10 @@ async function togglePiP(invocationTab) {
       results.some((r) => r && r.result && r.result.ok);
     if (!anyOk) {
       await sendMessageToTab(targetTab.id, { type: 'activate-pip' });
+    } else {
+      // We activated PiP via direct script; record ownership immediately
+      currentPipOwnerTabId = targetTab.id;
+      await saveOwnerToSession(currentPipOwnerTabId);
     }
   } catch (_) {
     await sendMessageToTab(targetTab.id, { type: 'activate-pip' });
@@ -187,9 +252,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === 'pip-status') {
     if (message.active === true && sender.tab && sender.tab.id != null) {
       currentPipOwnerTabId = sender.tab.id;
+      saveOwnerToSession(currentPipOwnerTabId);
     }
     if (message.active === false) {
       currentPipOwnerTabId = null;
+      clearOwnerFromSession();
     }
     sendResponse({ ok: true });
     return true;
@@ -210,11 +277,13 @@ chrome.commands.onCommand.addListener(async (command) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === currentPipOwnerTabId) {
     currentPipOwnerTabId = null;
+    clearOwnerFromSession();
   }
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (tabId === currentPipOwnerTabId && changeInfo.status === 'loading') {
     currentPipOwnerTabId = null;
+    clearOwnerFromSession();
   }
 });
