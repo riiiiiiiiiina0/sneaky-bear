@@ -60,18 +60,19 @@ async function activatePiP() {
 
 async function deactivatePiP() {
   try {
+    const activePipVideo = document.pictureInPictureElement || lastPipVideo;
     if (document.pictureInPictureElement) {
       await document.exitPictureInPicture();
-      chrome.runtime.sendMessage({ type: 'pip-status', active: false });
-      return true;
     }
-    // If no document-level PiP, attempt to leave for the last known video
-    if (lastPipVideo && document.pictureInPictureElement === lastPipVideo) {
-      await document.exitPictureInPicture();
-      chrome.runtime.sendMessage({ type: 'pip-status', active: false });
-      return true;
+    if (activePipVideo) {
+      try {
+        activePipVideo.pause();
+      } catch (_) {
+        /* ignore */
+      }
     }
-    return false;
+    chrome.runtime.sendMessage({ type: 'pip-status', active: false });
+    return true;
   } catch (err) {
     return false;
   }
