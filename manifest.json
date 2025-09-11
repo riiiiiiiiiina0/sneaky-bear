@@ -30,6 +30,9 @@
       "js": [
         "src/contentScripts/content.js"
       ],
+      "css": [
+        "src/contentScripts/content.css"
+      ],
       "run_at": "document_end",
       "all_frames": true
     }

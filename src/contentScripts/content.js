@@ -8,6 +8,49 @@
   const BUTTON_PIP_CLASS = '__sbp-btn-pip';
   const BUTTON_FS_CLASS = '__sbp-btn-fs';
 
+  let isFullscreen = false;
+
+  // Helpers for custom full-page mode
+  function enterFullpage(video) {
+    if (video.hasAttribute('data-sbp-fullpage')) return;
+    // Remember parent and next sibling for restoration
+    const parent = video.parentNode;
+    const next = video.nextSibling;
+    const hasControls = video.hasAttribute('controls');
+    video.setAttribute('data-sbp-fullpage', '1');
+    video.setAttribute('controls', 'controls');
+    video.classList.add('sbp-fullpage');
+    // Store parent and next sibling references
+    video.__sbp_fullpage_restore = { parent, next, hasControls };
+    // Move video directly under body
+    document.body.appendChild(video);
+    isFullscreen = true;
+  }
+
+  function exitFullpage(video) {
+    if (!video.hasAttribute('data-sbp-fullpage')) return;
+    video.removeAttribute('data-sbp-fullpage');
+    video.classList.remove('sbp-fullpage');
+    // Restore to original parent and position if possible
+    const { parent, next, hasControls } = video.__sbp_fullpage_restore || {};
+    if (parent) {
+      if (next && next.parentNode === parent) {
+        parent.insertBefore(video, next);
+      } else {
+        parent.appendChild(video);
+      }
+    }
+    if (hasControls) video.setAttribute('controls', 'controls');
+    else video.removeAttribute('controls');
+    delete video.__sbp_fullpage_restore;
+    isFullscreen = false;
+  }
+
+  function toggleFullpage(video) {
+    if (video.hasAttribute('data-sbp-fullpage')) exitFullpage(video);
+    else enterFullpage(video);
+  }
+
   function ensureStylesInjected() {
     if (document.getElementById(STYLE_ID)) return;
     const style = document.createElement('style');
@@ -88,6 +131,7 @@
 
     function attachHover(elem) {
       elem.addEventListener('mouseenter', () => {
+        if (isFullscreen) return;
         isHovering = true;
         setVisible(true);
       });
@@ -144,15 +188,15 @@
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
-        if (document.fullscreenElement) {
-          await document.exitFullscreen();
-        } else {
-          if (typeof video.requestFullscreen === 'function') {
-            await video.requestFullscreen();
-          } else if (video.webkitEnterFullscreen) {
-            video.webkitEnterFullscreen();
+        toggleFullpage(video);
+        // Reposition overlay after style change
+        requestAnimationFrame(() => {
+          const rect = video.getBoundingClientRect();
+          if (rect && rect.width && rect.height && video.__sbpOverlay) {
+            const evt = new Event('resize');
+            window.dispatchEvent(evt);
           }
-        }
+        });
       } catch (err) {
         console.warn('Fullscreen failed:', err);
       }
@@ -235,6 +279,14 @@
     ensureStylesInjected();
     scanExistingVideos();
     startObserving();
+    // ESC exits custom full-page mode
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        document
+          .querySelectorAll('video[data-sbp-fullpage]')
+          .forEach((v) => exitFullpage(v));
+      }
+    });
   }
 
   if (document.readyState === 'loading') {
