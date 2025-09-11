@@ -63,6 +63,16 @@ chrome.commands.onCommand.addListener(async (command) => {
   await setSessionTabId(null);
 });
 
+// When the user clicks the action button, ask the active tab to enter PiP
+try {
+  chrome.action.onClicked.addListener(async (tab) => {
+    try {
+      if (!tab || tab.id == null) return;
+      await chrome.tabs.sendMessage(tab.id, { type: 'sbp-enter-pip' });
+    } catch (_) {}
+  });
+} catch (_) {}
+
 // Also clear the session key when a tab is closed
 chrome.tabs.onRemoved.addListener(async (closedTabId) => {
   const current = await getSessionTabId();

@@ -351,45 +351,139 @@
     // Respond to a background request to exit PiP and pause
     try {
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (!message || message.type !== 'sbp-exit-pip-pause') return false;
-        (async () => {
-          let handled = false;
-          try {
-            const pipEl = document.pictureInPictureElement;
-            if (pipEl) {
+        if (!message) return false;
+        // Exit PiP and pause current PiP video
+        if (message.type === 'sbp-exit-pip-pause') {
+          (async () => {
+            let handled = false;
+            try {
+              const pipEl = document.pictureInPictureElement;
+              if (pipEl) {
+                try {
+                  await document.exitPictureInPicture();
+                } catch (_) {}
+                try {
+                  if (typeof pipEl['pause'] === 'function') pipEl['pause']();
+                } catch (_) {}
+                handled = true;
+              }
+            } catch (_) {}
+            if (!handled) {
               try {
-                await document.exitPictureInPicture();
+                const videos = Array.from(document.querySelectorAll('video'));
+                for (const v of videos) {
+                  if (
+                    typeof v['webkitSetPresentationMode'] === 'function' &&
+                    v['webkitPresentationMode'] === 'picture-in-picture'
+                  ) {
+                    try {
+                      v['webkitSetPresentationMode']('inline');
+                    } catch (_) {}
+                    try {
+                      if (typeof v['pause'] === 'function') v['pause']();
+                    } catch (_) {}
+                    handled = true;
+                  }
+                }
               } catch (_) {}
-              try {
-                if (typeof pipEl['pause'] === 'function') pipEl['pause']();
-              } catch (_) {}
-              handled = true;
             }
-          } catch (_) {}
-          if (!handled) {
+            try {
+              sendResponse({ ok: handled });
+            } catch (_) {}
+          })();
+          return true; // async response
+        }
+        // Enter PiP on best candidate video in the page
+        if (message.type === 'sbp-enter-pip') {
+          (async () => {
+            let ok = false;
             try {
               const videos = Array.from(document.querySelectorAll('video'));
-              for (const v of videos) {
-                if (
-                  typeof v['webkitSetPresentationMode'] === 'function' &&
-                  v['webkitPresentationMode'] === 'picture-in-picture'
+              const visibleVideos = videos
+                .map((v) => ({
+                  v,
+                  rect: (() => {
+                    try {
+                      return v.getBoundingClientRect();
+                    } catch (_) {
+                      return null;
+                    }
+                  })(),
+                }))
+                .filter(({ v, rect }) => {
+                  if (!rect || rect.width <= 0 || rect.height <= 0)
+                    return false;
+                  const cs = (() => {
+                    try {
+                      return getComputedStyle(v);
+                    } catch (_) {
+                      return null;
+                    }
+                  })();
+                  if (!cs) return true;
+                  if (cs.display === 'none' || cs.visibility === 'hidden')
+                    return false;
+                  return true;
+                })
+                .sort((a, b) => {
+                  const br = b.rect || { width: 0, height: 0 };
+                  const ar = a.rect || { width: 0, height: 0 };
+                  return br.width * br.height - ar.width * ar.height;
+                })
+                .map(({ v }) => v);
+
+              const video = visibleVideos[0] || videos[0];
+              if (video) {
+                try {
+                  attachPiPEventListeners(video);
+                } catch (_) {}
+                if (video.paused) {
+                  try {
+                    await video.play();
+                  } catch (_) {
+                    try {
+                      video.muted = true;
+                      await video.play();
+                    } catch (_) {}
+                  }
+                }
+
+                const currentPiP = document.pictureInPictureElement;
+                if (typeof video.requestPictureInPicture === 'function') {
+                  if (currentPiP && currentPiP !== video) {
+                    try {
+                      await document.exitPictureInPicture();
+                    } catch (_) {}
+                  }
+                  if (document.pictureInPictureElement !== video) {
+                    try {
+                      await video.requestPictureInPicture();
+                      ok = true;
+                    } catch (_) {}
+                  } else {
+                    ok = true;
+                  }
+                } else if (
+                  typeof video['webkitSetPresentationMode'] === 'function'
                 ) {
                   try {
-                    v['webkitSetPresentationMode']('inline');
+                    if (
+                      video['webkitPresentationMode'] !== 'picture-in-picture'
+                    ) {
+                      video['webkitSetPresentationMode']('picture-in-picture');
+                    }
+                    ok = true;
                   } catch (_) {}
-                  try {
-                    if (typeof v['pause'] === 'function') v['pause']();
-                  } catch (_) {}
-                  handled = true;
                 }
               }
             } catch (_) {}
-          }
-          try {
-            sendResponse({ ok: handled });
-          } catch (_) {}
-        })();
-        return true; // async response
+            try {
+              sendResponse({ ok });
+            } catch (_) {}
+          })();
+          return true; // async response
+        }
+        return false;
       });
     } catch (_) {}
   }
