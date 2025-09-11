@@ -10,6 +10,37 @@
 
   let isFullscreen = false;
 
+  // Notify background when this frame enters/leaves PiP
+  function attachPiPEventListeners(video) {
+    if (!video || video.__sbpPipListenersAttached) return;
+    const onEnter = () => {
+      try {
+        chrome.runtime.sendMessage({ type: 'sbp-pip-entered' });
+      } catch (_) {}
+    };
+    const onLeave = () => {
+      try {
+        chrome.runtime.sendMessage({ type: 'sbp-pip-exited' });
+      } catch (_) {}
+    };
+    try {
+      video.addEventListener('enterpictureinpicture', onEnter);
+      video.addEventListener('leavepictureinpicture', onLeave);
+    } catch (_) {}
+    try {
+      if (typeof video['webkitSetPresentationMode'] === 'function') {
+        video.addEventListener('webkitpresentationmodechanged', () => {
+          try {
+            const mode = video['webkitPresentationMode'];
+            if (mode === 'picture-in-picture') onEnter();
+            else if (mode === 'inline' || mode === 'fullscreen') onLeave();
+          } catch (_) {}
+        });
+      }
+    } catch (_) {}
+    video.__sbpPipListenersAttached = true;
+  }
+
   // Helpers for custom full-page mode
   function enterFullpage(video) {
     if (video.hasAttribute('data-sbp-fullpage')) return;
@@ -132,13 +163,11 @@
 
     function attachHover(elem) {
       elem.addEventListener('mouseenter', () => {
-        console.log('🐻‍❄️ [attachHover] mouseenter', isFullscreen);
         if (isFullscreen) return;
         isHovering = true;
         setVisible(true);
       });
       elem.addEventListener('mouseleave', () => {
-        console.log('🐻‍❄️ [attachHover] mouseleave', isFullscreen);
         isHovering = false;
         scheduleHide();
       });
@@ -254,8 +283,10 @@
   }
 
   function upsertOverlay(video) {
-    if (!video || video.__sbpOverlay) return;
-    createOverlayForVideo(video);
+    if (!video) return;
+    // Always ensure PiP listeners are attached (even if overlay already exists)
+    attachPiPEventListeners(video);
+    if (!video.__sbpOverlay) createOverlayForVideo(video);
   }
 
   function handleNewNode(node) {
@@ -316,6 +347,51 @@
           .forEach((v) => exitFullpage(v));
       }
     });
+
+    // Respond to a background request to exit PiP and pause
+    try {
+      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (!message || message.type !== 'sbp-exit-pip-pause') return false;
+        (async () => {
+          let handled = false;
+          try {
+            const pipEl = document.pictureInPictureElement;
+            if (pipEl) {
+              try {
+                await document.exitPictureInPicture();
+              } catch (_) {}
+              try {
+                if (typeof pipEl['pause'] === 'function') pipEl['pause']();
+              } catch (_) {}
+              handled = true;
+            }
+          } catch (_) {}
+          if (!handled) {
+            try {
+              const videos = Array.from(document.querySelectorAll('video'));
+              for (const v of videos) {
+                if (
+                  typeof v['webkitSetPresentationMode'] === 'function' &&
+                  v['webkitPresentationMode'] === 'picture-in-picture'
+                ) {
+                  try {
+                    v['webkitSetPresentationMode']('inline');
+                  } catch (_) {}
+                  try {
+                    if (typeof v['pause'] === 'function') v['pause']();
+                  } catch (_) {}
+                  handled = true;
+                }
+              }
+            } catch (_) {}
+          }
+          try {
+            sendResponse({ ok: handled });
+          } catch (_) {}
+        })();
+        return true; // async response
+      });
+    } catch (_) {}
   }
 
   if (document.readyState === 'loading') {

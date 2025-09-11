@@ -1,0 +1,18 @@
+{
+  "name": "pip",
+  "version": "1.0.0",
+  "description": "**Sneaky Bear PiP** is a Chrome extension that gives you full control over Picture-in-Picture (PiP). Watch videos from any page in a floating window — and instantly hide or deactivate PiP globally when you need to stay under the radar.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/chrome": "^0.1.9"
+  }
+}
