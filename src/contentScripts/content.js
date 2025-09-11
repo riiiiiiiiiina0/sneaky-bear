@@ -99,6 +99,7 @@
   }
 
   function createOverlayForVideo(video) {
+    console.log('🐻‍❄️ [createOverlayForVideo]', video);
     const overlay = document.createElement('div');
     overlay.className = OVERLAY_CLASS;
 
@@ -131,11 +132,13 @@
 
     function attachHover(elem) {
       elem.addEventListener('mouseenter', () => {
+        console.log('🐻‍❄️ [attachHover] mouseenter', isFullscreen);
         if (isFullscreen) return;
         isHovering = true;
         setVisible(true);
       });
       elem.addEventListener('mouseleave', () => {
+        console.log('🐻‍❄️ [attachHover] mouseleave', isFullscreen);
         isHovering = false;
         scheduleHide();
       });
@@ -144,7 +147,7 @@
     attachHover(video);
     attachHover(overlay);
 
-    // Position overlay centered horizontally, slightly above bottom
+    // Position overlay to cover the video exactly and center buttons inside
     function updateOverlayPosition() {
       const rect = video.getBoundingClientRect();
       if (!rect || rect.width === 0 || rect.height === 0) {
@@ -153,12 +156,13 @@
         return;
       }
       overlay.style.pointerEvents = 'none'; // reset; buttons re-enable
-
-      const top = Math.max(0, rect.top + window.scrollY + rect.height * 0.82);
-      const left = rect.left + window.scrollX + rect.width / 2;
-      overlay.style.top = `${top}px`;
-      overlay.style.left = `${left}px`;
-      overlay.style.transform = 'translate(-50%, -50%)';
+      overlay.style.position = 'fixed';
+      overlay.style.top = `${rect.top}px`;
+      overlay.style.left = `${rect.left}px`;
+      overlay.style.width = `${rect.width}px`;
+      overlay.style.height = `${rect.height}px`;
+      overlay.style.transform = 'none';
+      overlay.style.zIndex = '2147483647';
     }
 
     const reposition = () => updateOverlayPosition();
@@ -173,11 +177,34 @@
     pipBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
-        if (document.pictureInPictureElement) {
-          await document.exitPictureInPicture();
-        } else {
-          if (typeof video.requestPictureInPicture === 'function') {
+        // Ensure this video is playing
+        if (video.paused) {
+          try {
+            await video.play();
+          } catch (err) {
+            try {
+              video.muted = true;
+              await video.play();
+            } catch (_) {}
+          }
+        }
+
+        // Enter PiP for this video (switch from other PiP if needed)
+        const currentPiP = document.pictureInPictureElement;
+        if (typeof video.requestPictureInPicture === 'function') {
+          if (currentPiP && currentPiP !== video) {
+            try {
+              await document.exitPictureInPicture();
+            } catch (_) {}
+          }
+          if (document.pictureInPictureElement !== video) {
             await video.requestPictureInPicture();
+          }
+        } else if (typeof video.webkitSetPresentationMode === 'function') {
+          if (video.webkitPresentationMode !== 'picture-in-picture') {
+            try {
+              video.webkitSetPresentationMode('picture-in-picture');
+            } catch (_) {}
           }
         }
       } catch (err) {
@@ -248,7 +275,9 @@
   }
 
   function scanExistingVideos() {
-    document.querySelectorAll('video').forEach(upsertOverlay);
+    const videos = document.querySelectorAll('video');
+    console.log('🐻‍❄️ [scanExistingVideos]', videos);
+    videos.forEach(upsertOverlay);
   }
 
   function startObserving() {
