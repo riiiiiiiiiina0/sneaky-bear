@@ -1,90 +1,245 @@
-// @ts-nocheck
-/* global chrome */
-(() => {
-  const SENTINEL = Symbol('sbpip_attached');
+(function () {
+  if (document.documentElement.hasAttribute('data-sbp-injected')) return;
+  document.documentElement.setAttribute('data-sbp-injected', '1');
 
-  function send(type, payload) {
-    try {
-      // console.log('[Sneaky Bear] send', type, payload);
-      chrome.runtime.sendMessage({ type, ...payload });
-    } catch (e) {
-      // Ignore if context is unloading
+  const STYLE_ID = '__sneakyBearPipStyle';
+  const OVERLAY_CLASS = '__sbp-overlay';
+  const BUTTON_CLASS = '__sbp-btn';
+  const BUTTON_PIP_CLASS = '__sbp-btn-pip';
+  const BUTTON_FS_CLASS = '__sbp-btn-fs';
+
+  function ensureStylesInjected() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
+      .${OVERLAY_CLASS} {
+        position: absolute;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: center;
+        z-index: 2147483647; /* on top */
+        pointer-events: none; /* allow mouse to hit video except buttons */
+        opacity: 0;
+        transition: opacity 120ms ease-in-out;
+      }
+      .${OVERLAY_CLASS}.__visible { opacity: 1; }
+      .${BUTTON_CLASS} {
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 36px;
+        padding: 0 12px;
+        border-radius: 18px;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        font-size: 13px;
+        font-weight: 600;
+        border: 1px solid rgba(255,255,255,0.6);
+        color: #111;
+        background: rgba(255,255,255,0.92);
+        box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .${BUTTON_CLASS}:hover { filter: brightness(0.95); }
+      .${BUTTON_CLASS}:active { transform: translateY(1px); }
+
+      /* Hide overlay in PiP window (some browsers expose a minimal document) */
+      @media (display-mode: picture-in-picture) {
+        .${OVERLAY_CLASS} { display: none !important; }
+      }
+    `;
+    document.documentElement.appendChild(style);
+  }
+
+  function createOverlayForVideo(video) {
+    const overlay = document.createElement('div');
+    overlay.className = OVERLAY_CLASS;
+
+    const pipBtn = document.createElement('button');
+    pipBtn.className = `${BUTTON_CLASS} ${BUTTON_PIP_CLASS}`;
+    pipBtn.textContent = 'PiP';
+
+    const fsBtn = document.createElement('button');
+    fsBtn.className = `${BUTTON_CLASS} ${BUTTON_FS_CLASS}`;
+    fsBtn.textContent = 'Fullscreen';
+
+    overlay.appendChild(pipBtn);
+    overlay.appendChild(fsBtn);
+
+    // Manage hover visibility
+    let isHovering = false;
+    let hideTimer = null;
+
+    function setVisible(visible) {
+      if (visible) overlay.classList.add('__visible');
+      else overlay.classList.remove('__visible');
     }
-  }
 
-  function handlePlay() {
-    send('VIDEO_PLAYING');
-  }
+    function scheduleHide() {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        if (!isHovering) setVisible(false);
+      }, 160);
+    }
 
-  function handlePause() {
-    send('VIDEO_PAUSED');
-  }
+    function attachHover(elem) {
+      elem.addEventListener('mouseenter', () => {
+        isHovering = true;
+        setVisible(true);
+      });
+      elem.addEventListener('mouseleave', () => {
+        isHovering = false;
+        scheduleHide();
+      });
+    }
 
-  function handleEnterPiP() {
-    send('PIP_ENTERED');
-  }
+    attachHover(video);
+    attachHover(overlay);
 
-  function handleLeavePiP() {
-    send('PIP_EXITED');
-  }
+    // Position overlay centered horizontally, slightly above bottom
+    function updateOverlayPosition() {
+      const rect = video.getBoundingClientRect();
+      if (!rect || rect.width === 0 || rect.height === 0) {
+        overlay.style.opacity = '0';
+        overlay.style.pointerEvents = 'none';
+        return;
+      }
+      overlay.style.pointerEvents = 'none'; // reset; buttons re-enable
 
-  /** @param {HTMLVideoElement} video */
-  function attachVideoListeners(video) {
-    if (!video || video[SENTINEL]) return;
-    video[SENTINEL] = true;
+      const top = Math.max(0, rect.top + window.scrollY + rect.height * 0.82);
+      const left = rect.left + window.scrollX + rect.width / 2;
+      overlay.style.top = `${top}px`;
+      overlay.style.left = `${left}px`;
+      overlay.style.transform = 'translate(-50%, -50%)';
+    }
 
-    // Try to ensure PiP isn't disabled by page
+    const reposition = () => updateOverlayPosition();
+    const ro = new ResizeObserver(reposition);
     try {
-      video.disablePictureInPicture = false;
+      ro.observe(video);
     } catch (_) {}
+    window.addEventListener('scroll', reposition, { passive: true });
+    window.addEventListener('resize', reposition, { passive: true });
 
-    video.addEventListener('play', handlePlay, true);
-    video.addEventListener('playing', handlePlay, true);
-    video.addEventListener('pause', handlePause, true);
-    video.addEventListener('ended', handlePause, true);
-    video.addEventListener('enterpictureinpicture', handleEnterPiP, true);
-    video.addEventListener('leavepictureinpicture', handleLeavePiP, true);
-
-    // If the video is already playing when we attach, report it immediately
-    if (!video.paused && !video.ended && video.readyState >= 2) {
-      handlePlay();
-    }
-  }
-
-  /** @param {ParentNode} [root=document] */
-  function scanAndAttach(root = document) {
-    const videos = /** @type {ParentNode} */ (root).querySelectorAll
-      ? /** @type {ParentNode} */ (root).querySelectorAll('video')
-      : [];
-    if (videos.length === 0) return;
-    // console.log('[Sneaky Bear] scan and attach', videos);
-    videos.forEach(attachVideoListeners);
-  }
-
-  // Initial scan
-  scanAndAttach();
-
-  // Observe DOM for new videos
-  const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      mutation.addedNodes &&
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType !== 1) return;
-          const el = /** @type {Element} */ (node);
-          if (el.tagName === 'VIDEO') {
-            // console.log('[Sneaky Bear] video element added', el);
-            attachVideoListeners(/** @type {HTMLVideoElement} */ (el));
-          } else {
-            scanAndAttach(/** @type {ParentNode} */ (el));
+    // Wire buttons
+    pipBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+        } else {
+          if (typeof video.requestPictureInPicture === 'function') {
+            await video.requestPictureInPicture();
           }
-        });
-    }
-  });
+        }
+      } catch (err) {
+        console.warn('PiP failed:', err);
+      }
+    });
 
-  try {
-    observer.observe(document.documentElement || document, {
+    fsBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else {
+          if (typeof video.requestFullscreen === 'function') {
+            await video.requestFullscreen();
+          } else if (video.webkitEnterFullscreen) {
+            video.webkitEnterFullscreen();
+          }
+        }
+      } catch (err) {
+        console.warn('Fullscreen failed:', err);
+      }
+    });
+
+    // Insert overlay into DOM and position
+    document.documentElement.appendChild(overlay);
+    // Ensure buttons re-enable pointer events over them
+    overlay.querySelectorAll('button').forEach((btn) => {
+      btn.style.pointerEvents = 'auto';
+    });
+
+    // Initial position
+    requestAnimationFrame(reposition);
+
+    // Track association for cleanup on the video only
+    video.__sbpOverlay = overlay;
+
+    return overlay;
+  }
+
+  function removeOverlayForVideo(video) {
+    const overlay = video && video.__sbpOverlay;
+    if (overlay && overlay.parentNode) {
+      overlay.parentNode.removeChild(overlay);
+    }
+    if (video) delete video.__sbpOverlay;
+  }
+
+  function upsertOverlay(video) {
+    if (!video || video.__sbpOverlay) return;
+    createOverlayForVideo(video);
+  }
+
+  function handleNewNode(node) {
+    if (!(node instanceof Element)) return;
+    if (node.tagName === 'VIDEO') {
+      upsertOverlay(node);
+    }
+    const videos = node.querySelectorAll('video');
+    videos.forEach(upsertOverlay);
+  }
+
+  function handleRemovedNode(node) {
+    if (!(node instanceof Element)) return;
+    if (node.tagName === 'VIDEO') removeOverlayForVideo(node);
+    const videos = node.querySelectorAll('video');
+    videos.forEach(removeOverlayForVideo);
+  }
+
+  function scanExistingVideos() {
+    document.querySelectorAll('video').forEach(upsertOverlay);
+  }
+
+  function startObserving() {
+    const mo = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'childList') {
+          m.addedNodes.forEach(handleNewNode);
+          m.removedNodes.forEach(handleRemovedNode);
+        }
+        if (
+          m.type === 'attributes' &&
+          m.target instanceof Element &&
+          m.target.tagName === 'VIDEO'
+        ) {
+          upsertOverlay(m.target);
+        }
+      }
+    });
+    mo.observe(document.documentElement || document.body, {
       childList: true,
       subtree: true,
+      attributes: true,
+      attributeFilter: ['src', 'style', 'class', 'hidden'],
     });
-  } catch (_) {}
+  }
+
+  function init() {
+    ensureStylesInjected();
+    scanExistingVideos();
+    startObserving();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
 })();

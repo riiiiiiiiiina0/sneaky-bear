@@ -15,10 +15,6 @@
     "storage",
     "scripting"
   ],
-  "host_permissions": [
-    "http://*/*",
-    "https://*/*"
-  ],
   "background": {
     "service_worker": "src/background.js"
   },
@@ -34,7 +30,7 @@
       "js": [
         "src/contentScripts/content.js"
       ],
-      "run_at": "document_start",
+      "run_at": "document_end",
       "all_frames": true
     }
   ],
