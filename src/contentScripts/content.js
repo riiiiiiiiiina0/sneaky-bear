@@ -146,35 +146,22 @@
     overlay.appendChild(fsBtn);
 
     // Manage hover visibility
-    let isHovering = false;
     let hideTimer = null;
-
-    function setVisible(visible) {
-      if (visible) overlay.classList.add('__visible');
-      else overlay.classList.remove('__visible');
-    }
-
-    function scheduleHide() {
+    const showOverlay = () => {
+      if (isFullscreen) return;
       clearTimeout(hideTimer);
+      overlay.classList.add('__visible');
+    };
+    const hideOverlay = () => {
       hideTimer = setTimeout(() => {
-        if (!isHovering) setVisible(false);
-      }, 160);
-    }
+        overlay.classList.remove('__visible');
+      }, 200);
+    };
 
-    function attachHover(elem) {
-      elem.addEventListener('mouseenter', () => {
-        if (isFullscreen) return;
-        isHovering = true;
-        setVisible(true);
-      });
-      elem.addEventListener('mouseleave', () => {
-        isHovering = false;
-        scheduleHide();
-      });
-    }
-
-    attachHover(video);
-    attachHover(overlay);
+    [video, pipBtn, fsBtn].forEach((el) => {
+      el.addEventListener('mouseenter', showOverlay);
+      el.addEventListener('mouseleave', hideOverlay);
+    });
 
     // Position overlay to cover the video exactly and center buttons inside
     function updateOverlayPosition() {
