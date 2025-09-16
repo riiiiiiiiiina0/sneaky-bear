@@ -130,7 +130,6 @@
   }
 
   function createOverlayForVideo(video) {
-    console.log('🐻‍❄️ [createOverlayForVideo]', video);
     const overlay = document.createElement('div');
     overlay.className = OVERLAY_CLASS;
 
@@ -307,7 +306,6 @@
 
   function scanExistingVideos() {
     const videos = document.querySelectorAll('video');
-    console.log('🐻‍❄️ [scanExistingVideos]', videos);
     videos.forEach(upsertOverlay);
   }
 
