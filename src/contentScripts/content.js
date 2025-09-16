@@ -91,12 +91,14 @@
         position: absolute;
         display: flex;
         gap: 8px;
-        align-items: center;
+        align-items: flex-end;
         justify-content: center;
         z-index: 2147483647; /* on top */
         pointer-events: none; /* allow mouse to hit video except buttons */
         opacity: 0;
         transition: opacity 120ms ease-in-out;
+        padding-bottom: 20%;
+        box-sizing: border-box;
       }
       .${OVERLAY_CLASS}.__visible { opacity: 1; }
       .${BUTTON_CLASS} {
