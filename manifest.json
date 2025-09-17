@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Sneaky Bear PiP",
   "version": "2.1.0",
-  "description": "Sneaky Bear PiP lets you watch videos in Picture-in-Picture on any page, and hide them instantly when you need to stay under the radar.",
+  "description": "Sneaky Bear PiP lets you watch videos in Picture-in-Picture on any page, and hide them instantly with keyboard shortcut.",
   "icons": {
     "16": "icons/icon-16x16.png",
     "32": "icons/icon-32x32.png",
