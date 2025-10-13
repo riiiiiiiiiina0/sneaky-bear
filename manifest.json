@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sneaky Bear PiP",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Sneaky Bear PiP lets you watch videos in Picture-in-Picture on any page, and hide them instantly with keyboard shortcut.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjlLri/v/dglIWtZ3Ca91h6D+IwDxnsTsWWAGN4ZbEy5ORykFT2A54iK8T58ZNxZrfX+UrLpBw9zDFMpwhBZEv0buSAArFhvjUBV/3kLOMjqAltn8HPf8Cqx87Hu7twCjf96LjK1H9/1ee0uRl7ED/fAY3HQKiFb8rnKByC4ZyhIIjGbLdxi9THz5tLE6X0zC6kzioNEXN771R4/sb/gHLJyAhneq0mP4wvd0Map2/N95jjpzngfHeS79EqE412MFkdKBR7wvOIy2tb5s2HolLKxt/1OzyXTDxSauswZYMF03g6VE2TM8cJGSa7QDKUSaw8rt1dMenxGFPUUvrEsNBQIDAQAB",
   "icons": {
