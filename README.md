@@ -2,7 +2,7 @@
 
 **Sneaky Bear PiP** is a Chrome extension that gives you full control over Picture-in-Picture (PiP). Watch videos from any page in a floating window — and instantly hide or deactivate PiP globally when you need to stay under the radar.
 
-![](./docs/poster.jpeg)
+![](./docs/combined-image.jpeg)
 
 <a href="https://buymeacoffee.com/riiiiiiiiiina" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
